@@ -27,7 +27,7 @@ st.header("Consumo de Contratos", anchor=False)
 
 CONFIG_ANIOS = {
     "2025": {
-        "sheet_id": "1q2cvx9FD1CW8XP_kZpsFvfKtu4QdrJPqKAZuueHRIW4",
+        "sheet_id": "1q2cvx9FD1CW8XP",
         "folder_id": "1MQtSIS1l-nL0KLLgL46tmo83FJtq4XZJ"
     },
     "2026": {
