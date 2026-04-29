@@ -57,7 +57,6 @@ with col1:
 # ================= ESTADO =================
 
 defaults = {
-    "proyecto": "Todos",
     "empresa": "Todas",
     "contrato": ""
 }
@@ -170,7 +169,6 @@ def formato_pesos(valor):
     return f"$ {valor:,.2f}"
 
 def limpiar_filtros():
-    st.session_state.proyecto = "Todos"
     st.session_state.empresa = "Todas"
     st.session_state.contrato = ""
 
@@ -178,20 +176,13 @@ def limpiar_filtros():
 
 st.header("Filtros", anchor=False)
 
-c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
-
-with c1:
-    proyectos = ["Todos"] + sorted(df["DESC PROYECTO"].dropna().unique())
-    st.selectbox("DESCRIPCION DE PROGRAMA", proyectos, key="proyecto")
+c2, c3, c4 = st.columns([3, 3, 1])
 
 with c2:
     empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
     st.selectbox("EMPRESA", empresas, key="empresa")
 
 resultado = df.copy()
-
-if st.session_state.proyecto != "Todos":
-    resultado = resultado[resultado["DESC PROYECTO"] == st.session_state.proyecto]
 
 if st.session_state.empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == st.session_state.empresa]
