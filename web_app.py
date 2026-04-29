@@ -88,16 +88,15 @@ def cargar_datos(anio):
     service = build("drive", "v3", credentials=creds)
 
     # -------- SHEETS --------
-    ws_contratos = client.open_by_key(sheet_id).get_worksheet(0)
-    ws_evolucion = client.open_by_key(sheet_id).worksheet("Evolucion")
-    ws_clc = client.open_by_key(sheet_id).worksheet("CLC_CONTRATOS")
+    sh = client.open_by_key(sheet_id)
+
+    ws_contratos = sh.get_worksheet(0)
+    ws_clc = sh.worksheet("CLC_CONTRATOS")
 
     df_contratos = pd.DataFrame(ws_contratos.get_all_records())
-    df_evolucion = pd.DataFrame(ws_evolucion.get_all_records())
     df_clc = pd.DataFrame(ws_clc.get_all_records())
 
     df_contratos.columns = df_contratos.columns.str.strip()
-    df_evolucion.columns = df_evolucion.columns.str.strip()
     df_clc.columns = df_clc.columns.str.strip()
 
     # -------- DRIVE --------
@@ -131,10 +130,10 @@ def cargar_datos(anio):
     df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
     df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
 
-    return df_contratos, df_evolucion, df_clc
+    return df_contratos, df_clc
 
 
-df, df_evolucion, df_clc = cargar_datos(anio)
+df, df_clc = cargar_datos(anio)
 
 # ================= NORMALIZAR NUMÉRICOS =================
 
@@ -147,9 +146,6 @@ def limpiar_monto(col):
 
 for col in ["Importe total (LC)", "EJERCIDO", "Abrir importe (LC)"]:
     df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
-
-for col in ["ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]:
-    df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
 
 df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
 
@@ -195,23 +191,6 @@ with c3:
 
 with c4:
     st.button("Limpiar Filtros", on_click=limpiar_filtros)
-
-# ================= EVOLUCIÓN =================
-
-if st.session_state.proyecto != "Todos":
-
-    evo = df_evolucion[df_evolucion["PROYECTO"] == st.session_state.proyecto]
-
-    if not evo.empty:
-        evo = evo.iloc[0]
-
-        st.subheader("Evolución presupuestal del proyecto")
-
-        e1, e2, e3, e4 = st.columns(4)
-        e1.metric("Original", formato_pesos(evo["ORIGINAL"]))
-        e2.metric("Modificado", formato_pesos(evo["MODIFICADO"]))
-        e3.metric("Comprometido", formato_pesos(evo["COMPROMETIDO"]))
-        e4.metric("Ejercido", formato_pesos(evo["EJERCIDO"]))
 
 # ================= AGRUPAR =================
 
@@ -262,12 +241,9 @@ if not agrupado.empty:
 
     tabla["Importe total (LC)"] = tabla["Importe total (LC)"].apply(formato_pesos)
 
-    # 🔹 Si hay contrato seleccionado → mostrar colapsada
     if st.session_state.contrato:
         with st.expander("Resultados del proyecto / empresa", expanded=False):
             st.dataframe(tabla, use_container_width=True, height=300)
-
-    # 🔹 Si NO hay contrato seleccionado → mostrar normal
     else:
         st.subheader("Resultados")
         st.dataframe(tabla, use_container_width=True, height=420)
