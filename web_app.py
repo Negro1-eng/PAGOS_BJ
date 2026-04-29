@@ -24,7 +24,6 @@ div[data-testid="stStatusWidget"] {display: none !important;}
 st.header("Consumo de Contratos", anchor=False)
 
 # ================= CONFIGURACIÓN POR AÑO =================
-
 CONFIG_ANIOS = {
     "2025": {
         "sheet_id": "1-xq9SMUmxaDmCEmmMmahJa28wOHsuqoAgyly3HiNMNc",
@@ -37,7 +36,6 @@ CONFIG_ANIOS = {
 }
 
 # ================= SELECTOR DE AÑO =================
-
 st.header("Ejercicio fiscal", anchor=False)
 
 anio = st.selectbox(
@@ -46,7 +44,6 @@ anio = st.selectbox(
 )
 
 # ================= BOTÓN ACTUALIZAR =================
-
 col1, col2 = st.columns([1, 6])
 with col1:
     if st.button("Actualizar datos"):
@@ -55,7 +52,6 @@ with col1:
         st.rerun()
 
 # ================= ESTADO =================
-
 defaults = {
     "proyecto": "Todos",
     "empresa": "Todas",
@@ -67,7 +63,6 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # ================= NORMALIZACIÓN =================
-
 def normalizar_contrato(col):
     return (
         col.astype(str)
@@ -79,6 +74,9 @@ def normalizar_contrato(col):
 
 def normalizar_texto(texto):
     return str(texto).strip()
+
+def normalizar_clave(col):
+    return col.astype(str).str.strip()
 
 def cargar_rango_como_df(worksheet, rango):
     values = worksheet.get(rango)
@@ -100,10 +98,8 @@ def cargar_rango_como_df(worksheet, rango):
     return df
 
 # ================= CARGA DE DATOS =================
-
 @st.cache_data
 def cargar_datos(anio):
-
     sheet_id = CONFIG_ANIOS[anio]["sheet_id"]
     folder_id = CONFIG_ANIOS[anio]["folder_id"]
 
@@ -120,31 +116,32 @@ def cargar_datos(anio):
     client = gspread.authorize(creds)
     service = build("drive", "v3", credentials=creds)
 
-    # -------- SHEETS --------
     sh = client.open_by_key(sheet_id)
 
     ws_contratos = sh.get_worksheet(0)
+    ws_evolucion = sh.worksheet("Evolucion")
     ws_clc = sh.worksheet("CLC_CONTRATOS")
 
-    # MODIFICACIÓN: leer explícitamente hasta la columna R
     df_contratos = cargar_rango_como_df(ws_contratos, "A:R")
+    df_evolucion = pd.DataFrame(ws_evolucion.get_all_records())
     df_clc = pd.DataFrame(ws_clc.get_all_records())
 
     df_contratos.columns = df_contratos.columns.str.strip()
+    df_evolucion.columns = df_evolucion.columns.str.strip()
     df_clc.columns = df_clc.columns.str.strip()
 
-    # Opcional: crea columnas vacías si por alguna razón no llegan
     if "PARTIDA" not in df_contratos.columns:
         df_contratos["PARTIDA"] = ""
 
     if "DESC PARTIDA" not in df_contratos.columns:
         df_contratos["DESC PARTIDA"] = ""
 
-    # 🔥 NORMALIZAR CONTRATOS
+    df_contratos["PARTIDA"] = normalizar_clave(df_contratos["PARTIDA"])
+    df_evolucion["PARTIDA"] = normalizar_clave(df_evolucion["PARTIDA"])
+
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
     df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
 
-    # -------- DRIVE --------
     diccionario_links = {}
     page_token = None
 
@@ -175,13 +172,11 @@ def cargar_datos(anio):
     df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
     df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
 
-    return df_contratos, df_clc
+    return df_contratos, df_evolucion, df_clc
 
-
-df, df_clc = cargar_datos(anio)
+df, df_evolucion, df_clc = cargar_datos(anio)
 
 # ================= NORMALIZAR NUMÉRICOS =================
-
 def limpiar_monto(col):
     return (
         col.astype(str)
@@ -192,10 +187,13 @@ def limpiar_monto(col):
 for col in ["Importe total (LC)", "EJERCIDO", "Abrir importe (LC)"]:
     df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
 
+for col in ["ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]:
+    if col in df_evolucion.columns:
+        df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
+
 df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
 
 # ================= FUNCIONES =================
-
 def formato_pesos(valor):
     return f"$ {valor:,.2f}"
 
@@ -205,14 +203,13 @@ def limpiar_filtros():
     st.session_state.contrato = ""
 
 # ================= FILTROS =================
-
 st.header("Filtros", anchor=False)
 
 c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
 
 with c1:
     proyectos = ["Todos"] + sorted(df["DESC PARTIDA"].dropna().unique())
-    st.selectbox("DESCRIPCION DE PARTIDA", proyectos, key="PARTIDA")
+    st.selectbox("DESCRIPCION DE PARTIDA", proyectos, key="proyecto")
 
 with c2:
     empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
@@ -237,8 +234,30 @@ with c3:
 with c4:
     st.button("Limpiar Filtros", on_click=limpiar_filtros)
 
-# ================= AGRUPAR =================
+# ================= EVOLUCIÓN =================
+if st.session_state.proyecto != "Todos":
+    partida_seleccionada = (
+        resultado["PARTIDA"].dropna().astype(str).iloc[0]
+        if not resultado.empty else None
+    )
 
+    if partida_seleccionada:
+        evo = df_evolucion[df_evolucion["PARTIDA"].astype(str) == str(partida_seleccionada)]
+
+        if not evo.empty:
+            evo = evo.iloc[0]
+
+            st.header("Evolución de la Partida", anchor=False)
+
+            e1, e2, e3, e4 = st.columns(4)
+            e1.metric("Original", formato_pesos(evo["ORIGINAL"]))
+            e2.metric("Modificado", formato_pesos(evo["MODIFICADO"]))
+            e3.metric("Comprometido", formato_pesos(evo["COMPROMETIDO"]))
+            e4.metric("Ejercido", formato_pesos(evo["EJERCIDO"]))
+        else:
+            st.warning("No se encontraron valores en la hoja Evolucion para la partida seleccionada.")
+
+# ================= AGRUPAR =================
 agrupado = resultado.groupby(
     ["N° CONTRATO", "DESCRIPCION", "PARTIDA", "DESC PARTIDA"],
     as_index=False
@@ -251,11 +270,9 @@ agrupado = resultado.groupby(
 })
 
 # ================= CONSUMO =================
-
 st.header("Consumo del Contrato", anchor=False)
 
 if st.session_state.contrato:
-
     df_contrato = agrupado[
         agrupado["N° CONTRATO"] == st.session_state.contrato
     ]
@@ -268,14 +285,11 @@ if st.session_state.contrato:
     a.metric("Importe del contrato", formato_pesos(monto_contrato))
     b.metric("Importe ejercido", formato_pesos(monto_ejercido))
     c.metric("Importe pendiente", formato_pesos(monto_pendiente))
-
 else:
     st.info("Selecciona un contrato para ver el consumo")
 
 # ================= TABLA =================
-
 if not agrupado.empty:
-
     tabla = agrupado[[
         "N° CONTRATO",
         "DESCRIPCION",
@@ -292,14 +306,11 @@ if not agrupado.empty:
     else:
         st.subheader("Resultados")
         st.dataframe(tabla, use_container_width=True, height=420)
-
 else:
     st.info("No hay contratos disponibles para los filtros seleccionados.")
 
 # ================= CLC =================
-
 if st.session_state.contrato:
-
     st.header("CLC DEL CONTRATO", anchor=False)
 
     clc_contrato = df_clc[
