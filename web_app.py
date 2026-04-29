@@ -142,7 +142,20 @@ def cargar_datos(anio):
         df_contratos["DESC PARTIDA"] = ""
 
     df_contratos["PARTIDA"] = normalizar_partida(df_contratos["PARTIDA"])
-    df_evolucion["PARTIDA"] = normalizar_partida(df_evolucion["PARTIDA"])
+
+    col_partida_evolucion = None
+    if "PARTIDA" in df_evolucion.columns:
+        col_partida_evolucion = "PARTIDA"
+    elif "Etiquetas fila" in df_evolucion.columns:
+        col_partida_evolucion = "Etiquetas fila"
+    elif "ETIQUETAS FILA" in df_evolucion.columns:
+        col_partida_evolucion = "ETIQUETAS FILA"
+
+    if col_partida_evolucion is None:
+        st.error(f"No encontré la columna de partida en Evolucion. Columnas: {list(df_evolucion.columns)}")
+        st.stop()
+
+    df_evolucion[col_partida_evolucion] = normalizar_partida(df_evolucion[col_partida_evolucion])
 
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
     df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
@@ -174,12 +187,15 @@ def cargar_datos(anio):
         if page_token is None:
             break
 
-    df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
-    df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
+    if "CLC" in df_clc.columns:
+        df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
+        df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
+    else:
+        df_clc["PDF"] = None
 
-    return df_contratos, df_evolucion, df_clc
+    return df_contratos, df_evolucion, df_clc, col_partida_evolucion
 
-df, df_evolucion, df_clc = cargar_datos(anio)
+df, df_evolucion, df_clc, col_partida_evolucion = cargar_datos(anio)
 
 # ================= NORMALIZAR NUMÉRICOS =================
 def limpiar_monto(col):
@@ -190,13 +206,15 @@ def limpiar_monto(col):
     )
 
 for col in ["Importe total (LC)", "EJERCIDO", "Abrir importe (LC)"]:
-    df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
+    if col in df.columns:
+        df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
 
 for col in ["ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]:
     if col in df_evolucion.columns:
         df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
 
-df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
+if "MONTO" in df_clc.columns:
+    df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
 
 # ================= FUNCIONES =================
 def formato_pesos(valor):
@@ -250,7 +268,7 @@ if st.session_state.proyecto != "Todos":
     )
 
     evo = df_evolucion[
-        df_evolucion["PARTIDA"].astype(str).isin(partidas_seleccionadas)
+        df_evolucion[col_partida_evolucion].astype(str).isin(partidas_seleccionadas)
     ].copy()
 
     if not evo.empty:
@@ -267,24 +285,15 @@ if st.session_state.proyecto != "Todos":
         e3.metric("Comprometido", formato_pesos(comprometido))
         e4.metric("Ejercido", formato_pesos(ejercido_evolucion))
 
-        st.subheader("Validación de cruce")
-        validacion = resultado[["PARTIDA", "DESC PARTIDA"]].drop_duplicates().copy()
-        st.dataframe(validacion, use_container_width=True)
-
         st.subheader("Registros encontrados en Evolucion")
-        columnas_evo = [col for col in ["PARTIDA", "ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"] if col in evo.columns]
+        columnas_evo = [
+            col for col in
+            [col_partida_evolucion, "ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]
+            if col in evo.columns
+        ]
         st.dataframe(evo[columnas_evo], use_container_width=True)
     else:
         st.warning("No se encontraron valores en la hoja Evolucion para las partidas seleccionadas.")
-
-        st.subheader("Validación de cruce")
-        validacion = resultado[["PARTIDA", "DESC PARTIDA"]].drop_duplicates().copy()
-        st.dataframe(validacion, use_container_width=True)
-
-        st.subheader("Primeras partidas en hoja Evolucion")
-        if "PARTIDA" in df_evolucion.columns:
-            muestra_evolucion = df_evolucion[["PARTIDA"]].drop_duplicates().head(20)
-            st.dataframe(muestra_evolucion, use_container_width=True)
 
 # ================= AGRUPAR =================
 agrupado = resultado.groupby(
@@ -344,23 +353,23 @@ else:
 if st.session_state.contrato:
     st.header("CLC DEL CONTRATO", anchor=False)
 
+    columnas_clc = [
+        col for col in
+        ["CLC", "ESTIMACION", "Fecha de Compen.", "Doc. Compen.", "FACTURA", "MONTO", "PDF"]
+        if col in df_clc.columns
+    ]
+
     clc_contrato = df_clc[
         df_clc["CONTRATO"] == st.session_state.contrato
-    ][[
-        "CLC",
-        "ESTIMACION",
-        "Fecha de Compen.",
-        "Doc. Compen.",
-        "FACTURA",
-        "MONTO",
-        "PDF"
-    ]].copy()
+    ][columnas_clc].copy()
 
     if clc_contrato.empty:
         st.warning("Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
     else:
-        total_clc = clc_contrato["MONTO"].sum()
-        clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
+        total_clc = clc_contrato["MONTO"].sum() if "MONTO" in clc_contrato.columns else 0
+
+        if "MONTO" in clc_contrato.columns:
+            clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
 
         st.dataframe(
             clc_contrato,
