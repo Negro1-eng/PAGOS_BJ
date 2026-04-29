@@ -27,12 +27,12 @@ st.header("Consumo de Contratos", anchor=False)
 
 CONFIG_ANIOS = {
     "2025": {
-        "sheet_id": "1q2cvx9FD1CW8XP",
+        "sheet_id": "1-xq9SMUmxaDmCEmmMmahJa28wOHsuqoAgyly3HiNMNc",
         "folder_id": "1MQtSIS1l-nL0KLLgL46tmo83FJtq4XZJ"
     },
     "2026": {
-        "sheet_id": "1-xq9SMUmxaDmCEmmMmahJa28wOHsuqoAgyly3HiNMNc/edit?gid=0#gid=0",
-        "folder_id": "1-xq9SMUmxaDmCEmmMmahJa28wOHsuqoAgyly3HiNMNc"
+        "sheet_id": "1-xq9SMUmxaDmCEmmMmahJa28wOHsuqoAgyly3HiNMNc",
+        "folder_id": "1xgK3R9cX0zHllQDcJ1x8z100tKB_9EAu"
     }
 }
 
