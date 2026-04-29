@@ -21,7 +21,7 @@ div[data-testid="stStatusWidget"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
-st.header("Consumo de Contratos", anchor=False)
+st.header("Consumo de Contratos BJ 2026", anchor=False)
 
 # ================= CONFIGURACIÓN POR AÑO =================
 
@@ -109,7 +109,7 @@ def cargar_datos(anio):
     df_contratos.columns = df_contratos.columns.str.strip()
     df_clc.columns = df_clc.columns.str.strip()
 
-    # 🔥 NORMALIZAR CONTRATOS
+    #  NORMALIZAR CONTRATOS
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
     df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
 
@@ -276,7 +276,7 @@ if st.session_state.contrato:
     ]].copy()
 
     if clc_contrato.empty:
-        st.warning("⚠️ Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
+        st.warning("Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
     else:
         total_clc = clc_contrato["MONTO"].sum()
         clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
