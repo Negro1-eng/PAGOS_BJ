@@ -5,15 +5,10 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import re
 
-# ================= CONFIG =================
 st.set_page_config(page_title="Consumo de Contratos", layout="wide")
 st.header("Consumo de Contratos")
 
 CONFIG_ANIOS = {
-    "2025": {
-        "sheet_id": "1q2cvx9FD1CW8XP_kZpsFvfKtu4QdrJPqKAZuueHRIW4",
-        "folder_id": "1MQtSIS1l-nL0KLLgL46tmo83FJtq4XZJ"
-    },
     "2026": {
         "sheet_id": "109Jew5EPHYfwpdWKJYG2N2jRDRU502eVWYTOuM-igdc",
         "folder_id": "1VEFnedYn74acbepMsLu4JILNrLKcstdD"
@@ -21,10 +16,6 @@ CONFIG_ANIOS = {
 }
 
 anio = st.selectbox("Ejercicio fiscal", list(CONFIG_ANIOS.keys()))
-
-if st.button("Actualizar datos"):
-    st.cache_data.clear()
-    st.rerun()
 
 # ================= FUNCIONES =================
 def limpiar_columnas(df):
@@ -37,11 +28,8 @@ def limpiar_monto(col):
 def formato_pesos(x):
     return f"$ {x:,.2f}"
 
-def buscar_columna(df, nombre):
-    for col in df.columns:
-        if nombre in col.upper():
-            return col
-    return None
+def normalizar_clave(col):
+    return col.astype(str).str.strip()
 
 # ================= CARGA =================
 @st.cache_data
@@ -68,105 +56,74 @@ def cargar_datos(anio):
     df_evolucion = limpiar_columnas(df_evolucion)
     df_clc = limpiar_columnas(df_clc)
 
-    # DRIVE LINKS
-    folder_id = CONFIG_ANIOS[anio]["folder_id"]
+    # 🔥 NORMALIZAR PARTIDAS
+    df["N° PARTIDA"] = normalizar_clave(df["N° PARTIDA"])
+    df_evolucion["PARTIDA"] = normalizar_clave(df_evolucion["PARTIDA"])
+
+    # ================= DRIVE =================
     diccionario_links = {}
-    page_token = None
+    folder_id = CONFIG_ANIOS[anio]["folder_id"]
 
-    while True:
-        response = service.files().list(
-            q=f"'{folder_id}' in parents and mimeType='application/pdf'",
-            fields="nextPageToken, files(id, name)",
-            pageSize=1000,
-            pageToken=page_token
-        ).execute()
+    files = service.files().list(
+        q=f"'{folder_id}' in parents and mimeType='application/pdf'",
+        fields="files(id, name)"
+    ).execute()["files"]
 
-        for f in response.get("files", []):
-            match = re.search(r"\d+", f["name"])
-            if match:
-                diccionario_links[match.group()] = f"https://drive.google.com/file/d/{f['id']}/view"
+    for f in files:
+        match = re.search(r"\d+", f["name"])
+        if match:
+            diccionario_links[match.group()] = f"https://drive.google.com/file/d/{f['id']}/view"
 
-        page_token = response.get("nextPageToken")
-        if not page_token:
-            break
-
-    if "CLC" in df_clc.columns:
-        df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
-        df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
+    df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
+    df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
 
     return df, df_evolucion, df_clc
 
 
 df, df_evolucion, df_clc = cargar_datos(anio)
 
-# ================= DETECTAR COLUMNAS =================
-col_partida_evo = buscar_columna(df_evolucion, "PARTIDA")
-col_desc_evo = buscar_columna(df_evolucion, "DESCRIP")
-
-col_partida_df = buscar_columna(df, "PARTIDA")
-
-# ================= LIMPIAR NUMÉRICOS =================
+# ================= NUMÉRICOS =================
 for col in ["IMPORTE TOTAL (LC)", "EJERCIDO", "ABRIR IMPORTE (LC)"]:
-    if col in df.columns:
-        df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
+    df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
 
 for col in ["ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]:
-    if col in df_evolucion.columns:
-        df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
+    df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
 
-if "MONTO" in df_clc.columns:
-    df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
+df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
 
 # ================= FILTROS =================
 st.header("Filtros")
 
-c1, c2, c3, c4 = st.columns([3,3,3,1])
+c1, c2, c3 = st.columns(3)
 
 with c1:
-    if col_partida_evo and col_desc_evo:
-        df_evolucion["FILTRO"] = (
-            df_evolucion[col_partida_evo].astype(str).str.strip()
-            + " - " +
-            df_evolucion[col_desc_evo].astype(str).str.strip()
-        )
-        opciones = ["Todos"] + sorted(df_evolucion["FILTRO"].unique())
-    else:
-        st.error("No se detectó PARTIDA o DESCRIPCION")
-        opciones = ["Todos"]
-
-    filtro = st.selectbox("PARTIDA / DESCRIPCION", opciones)
-
-with c2:
-    empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique()) if "EMPRESA" in df.columns else ["Todas"]
-    empresa = st.selectbox("EMPRESA", empresas)
+    df_evolucion["FILTRO"] = df_evolucion["PARTIDA"] + " - " + df_evolucion["PARTIDA"]
+    filtro = st.selectbox("PARTIDA", ["Todos"] + sorted(df_evolucion["PARTIDA"].unique()))
 
 resultado = df.copy()
 
-if filtro != "Todos" and col_partida_df:
-    partida = filtro.split(" - ")[0]
-    resultado = resultado[resultado[col_partida_df].astype(str).str.strip() == partida]
+if filtro != "Todos":
+    resultado = resultado[resultado["N° PARTIDA"] == filtro]
+
+with c2:
+    empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
+    empresa = st.selectbox("EMPRESA", empresas)
 
 if empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == empresa]
 
-contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().astype(str).unique()) if "N° CONTRATO" in df.columns else [""]
-
 with c3:
+    contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().astype(str).unique())
     contrato = st.selectbox("CONTRATO", contratos)
 
-with c4:
-    if st.button("Limpiar"):
-        st.rerun()
-
 # ================= EVOLUCIÓN =================
-if filtro != "Todos" and col_partida_evo:
-    partida = filtro.split(" - ")[0]
-    evo = df_evolucion[df_evolucion[col_partida_evo].astype(str).str.strip() == partida]
+if filtro != "Todos":
+    evo = df_evolucion[df_evolucion["PARTIDA"] == filtro]
 
     if not evo.empty:
         evo = evo.iloc[0]
 
-        st.subheader("Evolución presupuestal")
+        st.subheader("Evolución por partida")
 
         e1,e2,e3,e4 = st.columns(4)
         e1.metric("Original", formato_pesos(evo["ORIGINAL"]))
@@ -175,38 +132,19 @@ if filtro != "Todos" and col_partida_evo:
         e4.metric("Ejercido", formato_pesos(evo["EJERCIDO"]))
 
 # ================= AGRUPADO =================
-if "DESCRIPCION" in df.columns:
-    agrupado = resultado.groupby(
-        ["N° CONTRATO", "DESCRIPCION"],
-        as_index=False
-    ).agg({
-        "IMPORTE TOTAL (LC)": "max",
-        "EJERCIDO": "sum",
-        "ABRIR IMPORTE (LC)": "sum"
-    })
-else:
-    agrupado = pd.DataFrame()
+agrupado = resultado.groupby(
+    ["N° CONTRATO", "DESCRIPCION"],
+    as_index=False
+).agg({
+    "IMPORTE TOTAL (LC)": "max",
+    "EJERCIDO": "sum",
+    "ABRIR IMPORTE (LC)": "sum"
+})
 
-# ================= CONSUMO =================
-st.header("Consumo del contrato")
-
-if contrato and not agrupado.empty:
-    d = agrupado[agrupado["N° CONTRATO"].astype(str) == contrato]
-
-    if not d.empty:
-        a,b,c = st.columns(3)
-        a.metric("Contrato", formato_pesos(d["IMPORTE TOTAL (LC)"].iloc[0]))
-        b.metric("Ejercido", formato_pesos(d["EJERCIDO"].iloc[0]))
-        c.metric("Pendiente", formato_pesos(d["ABRIR IMPORTE (LC)"].iloc[0]))
-
-# ================= TABLA =================
-if not agrupado.empty:
-    st.dataframe(agrupado, use_container_width=True)
+st.dataframe(agrupado, use_container_width=True)
 
 # ================= CLC =================
-if contrato and not df_clc.empty:
-    st.subheader("CLC")
-
+if contrato:
     clc = df_clc[df_clc["CONTRATO"].astype(str) == contrato]
 
     if not clc.empty:
@@ -214,8 +152,6 @@ if contrato and not df_clc.empty:
 
         st.dataframe(
             clc,
-            column_config={
-                "PDF": st.column_config.LinkColumn("PDF", display_text="Ver PDF")
-            },
+            column_config={"PDF": st.column_config.LinkColumn("PDF")},
             use_container_width=True
         )
