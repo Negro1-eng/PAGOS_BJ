@@ -7,7 +7,7 @@ import re
 
 # ================= CONFIGURACIÓN =================
 st.set_page_config(
-    page_title="Consumo de Contratos BJ 2026",
+    page_title="Buscador de Consumo de Contratos",
     layout="wide"
 )
 
@@ -21,7 +21,7 @@ div[data-testid="stStatusWidget"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
-st.header("Consumo de Contratos BJ 2026", anchor=False)
+st.header("Consumo de Contratos", anchor=False)
 
 # ================= CONFIGURACIÓN POR AÑO =================
 
@@ -57,6 +57,7 @@ with col1:
 # ================= ESTADO =================
 
 defaults = {
+    "proyecto": "Todos",
     "empresa": "Todas",
     "contrato": ""
 }
@@ -109,7 +110,7 @@ def cargar_datos(anio):
     df_contratos.columns = df_contratos.columns.str.strip()
     df_clc.columns = df_clc.columns.str.strip()
 
-    #  NORMALIZAR CONTRATOS
+    # 🔥 NORMALIZAR CONTRATOS
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
     df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
 
@@ -169,6 +170,7 @@ def formato_pesos(valor):
     return f"$ {valor:,.2f}"
 
 def limpiar_filtros():
+    st.session_state.proyecto = "Todos"
     st.session_state.empresa = "Todas"
     st.session_state.contrato = ""
 
@@ -176,13 +178,20 @@ def limpiar_filtros():
 
 st.header("Filtros", anchor=False)
 
-c2, c3, c4 = st.columns([3, 3, 1])
+c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
+
+with c1:
+    proyectos = ["Todos"] + sorted(df["DESC PROYECTO"].dropna().unique())
+    st.selectbox("DESCRIPCION DE PROGRAMA", proyectos, key="proyecto")
 
 with c2:
     empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
     st.selectbox("EMPRESA", empresas, key="empresa")
 
 resultado = df.copy()
+
+if st.session_state.proyecto != "Todos":
+    resultado = resultado[resultado["DESC PROYECTO"] == st.session_state.proyecto]
 
 if st.session_state.empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == st.session_state.empresa]
@@ -276,7 +285,7 @@ if st.session_state.contrato:
     ]].copy()
 
     if clc_contrato.empty:
-        st.warning("Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
+        st.warning("⚠️ Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
     else:
         total_clc = clc_contrato["MONTO"].sum()
         clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
