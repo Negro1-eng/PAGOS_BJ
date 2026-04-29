@@ -266,8 +266,25 @@ if st.session_state.proyecto != "Todos":
         e2.metric("Modificado", formato_pesos(modificado))
         e3.metric("Comprometido", formato_pesos(comprometido))
         e4.metric("Ejercido", formato_pesos(ejercido_evolucion))
+
+        st.subheader("Validación de cruce")
+        validacion = resultado[["PARTIDA", "DESC PARTIDA"]].drop_duplicates().copy()
+        st.dataframe(validacion, use_container_width=True)
+
+        st.subheader("Registros encontrados en Evolucion")
+        columnas_evo = [col for col in ["PARTIDA", "ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"] if col in evo.columns]
+        st.dataframe(evo[columnas_evo], use_container_width=True)
     else:
         st.warning("No se encontraron valores en la hoja Evolucion para las partidas seleccionadas.")
+
+        st.subheader("Validación de cruce")
+        validacion = resultado[["PARTIDA", "DESC PARTIDA"]].drop_duplicates().copy()
+        st.dataframe(validacion, use_container_width=True)
+
+        st.subheader("Primeras partidas en hoja Evolucion")
+        if "PARTIDA" in df_evolucion.columns:
+            muestra_evolucion = df_evolucion[["PARTIDA"]].drop_duplicates().head(20)
+            st.dataframe(muestra_evolucion, use_container_width=True)
 
 # ================= AGRUPAR =================
 agrupado = resultado.groupby(
