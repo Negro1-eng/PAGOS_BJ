@@ -102,6 +102,21 @@ def cargar_rango_como_df(worksheet, rango):
     df.columns = [normalizar_texto(col) for col in df.columns]
     return df
 
+def limpiar_monto(col):
+    return (
+        col.astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+    )
+
+def formato_pesos(valor):
+    return f"$ {valor:,.2f}"
+
+def limpiar_filtros():
+    st.session_state.proyecto = "Todos"
+    st.session_state.empresa = "Todas"
+    st.session_state.contrato = ""
+
 # ================= CARGA DE DATOS =================
 @st.cache_data
 def cargar_datos(anio):
@@ -143,22 +158,28 @@ def cargar_datos(anio):
 
     df_contratos["PARTIDA"] = normalizar_partida(df_contratos["PARTIDA"])
 
-    col_partida_evolucion = None
-    if "PARTIDA" in df_evolucion.columns:
-        col_partida_evolucion = "PARTIDA"
-    elif "Etiquetas fila" in df_evolucion.columns:
-        col_partida_evolucion = "Etiquetas fila"
-    elif "ETIQUETAS FILA" in df_evolucion.columns:
-        col_partida_evolucion = "ETIQUETAS FILA"
-
-    if col_partida_evolucion is None:
-        st.error(f"No encontré la columna de partida en Evolucion. Columnas: {list(df_evolucion.columns)}")
+    if "Etiquetas fila" not in df_evolucion.columns:
+        st.error(f"No existe la columna 'Etiquetas fila' en Evolucion. Columnas: {list(df_evolucion.columns)}")
         st.stop()
 
-    df_evolucion[col_partida_evolucion] = normalizar_partida(df_evolucion[col_partida_evolucion])
+    df_evolucion["Etiquetas fila"] = normalizar_partida(df_evolucion["Etiquetas fila"])
+
+    if "PARTIDA" in df_evolucion.columns:
+        df_evolucion["PARTIDA"] = df_evolucion["PARTIDA"].astype(str).str.strip()
 
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
     df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
+
+    for col in ["Importe total (LC)", "EJERCIDO", "Abrir importe (LC)"]:
+        if col in df_contratos.columns:
+            df_contratos[col] = pd.to_numeric(limpiar_monto(df_contratos[col]), errors="coerce").fillna(0)
+
+    for col in ["ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]:
+        if col in df_evolucion.columns:
+            df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
+
+    if "MONTO" in df_clc.columns:
+        df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
 
     diccionario_links = {}
     page_token = None
@@ -176,14 +197,13 @@ def cargar_datos(anio):
         for file in files:
             nombre = file["name"]
             file_id = file["id"]
-
             match = re.search(r"\d+", nombre)
+
             if match:
                 clc = match.group()
-                link = f"https://drive.google.com/file/d/{file_id}/view"
-                diccionario_links[clc] = link
+                diccionario_links[clc] = f"https://drive.google.com/file/d/{file_id}/view"
 
-        page_token = response.get("nextPageToken", None)
+        page_token = response.get("nextPageToken")
         if page_token is None:
             break
 
@@ -193,37 +213,9 @@ def cargar_datos(anio):
     else:
         df_clc["PDF"] = None
 
-    return df_contratos, df_evolucion, df_clc, col_partida_evolucion
+    return df_contratos, df_evolucion, df_clc
 
-df, df_evolucion, df_clc, col_partida_evolucion = cargar_datos(anio)
-
-# ================= NORMALIZAR NUMÉRICOS =================
-def limpiar_monto(col):
-    return (
-        col.astype(str)
-        .str.replace("$", "", regex=False)
-        .str.replace(",", "", regex=False)
-    )
-
-for col in ["Importe total (LC)", "EJERCIDO", "Abrir importe (LC)"]:
-    if col in df.columns:
-        df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
-
-for col in ["ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]:
-    if col in df_evolucion.columns:
-        df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
-
-if "MONTO" in df_clc.columns:
-    df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
-
-# ================= FUNCIONES =================
-def formato_pesos(valor):
-    return f"$ {valor:,.2f}"
-
-def limpiar_filtros():
-    st.session_state.proyecto = "Todos"
-    st.session_state.empresa = "Todas"
-    st.session_state.contrato = ""
+df, df_evolucion, df_clc = cargar_datos(anio)
 
 # ================= FILTROS =================
 st.header("Filtros", anchor=False)
@@ -268,7 +260,7 @@ if st.session_state.proyecto != "Todos":
     )
 
     evo = df_evolucion[
-        df_evolucion[col_partida_evolucion].astype(str).isin(partidas_seleccionadas)
+        df_evolucion["Etiquetas fila"].astype(str).isin(partidas_seleccionadas)
     ].copy()
 
     if not evo.empty:
@@ -287,8 +279,7 @@ if st.session_state.proyecto != "Todos":
 
         st.subheader("Registros encontrados en Evolucion")
         columnas_evo = [
-            col for col in
-            [col_partida_evolucion, "ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]
+            col for col in ["Etiquetas fila", "PARTIDA", "ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]
             if col in evo.columns
         ]
         st.dataframe(evo[columnas_evo], use_container_width=True)
@@ -311,9 +302,7 @@ agrupado = resultado.groupby(
 st.header("Consumo del Contrato", anchor=False)
 
 if st.session_state.contrato:
-    df_contrato = agrupado[
-        agrupado["N° CONTRATO"] == st.session_state.contrato
-    ]
+    df_contrato = agrupado[agrupado["N° CONTRATO"] == st.session_state.contrato]
 
     monto_contrato = df_contrato["Importe total (LC)"].max()
     monto_ejercido = df_contrato["EJERCIDO"].sum()
@@ -354,8 +343,7 @@ if st.session_state.contrato:
     st.header("CLC DEL CONTRATO", anchor=False)
 
     columnas_clc = [
-        col for col in
-        ["CLC", "ESTIMACION", "Fecha de Compen.", "Doc. Compen.", "FACTURA", "MONTO", "PDF"]
+        col for col in ["CLC", "ESTIMACION", "Fecha de Compen.", "Doc. Compen.", "FACTURA", "MONTO", "PDF"]
         if col in df_clc.columns
     ]
 
@@ -375,10 +363,7 @@ if st.session_state.contrato:
             clc_contrato,
             use_container_width=True,
             column_config={
-                "PDF": st.column_config.LinkColumn(
-                    "PDF",
-                    display_text="Ver PDF"
-                )
+                "PDF": st.column_config.LinkColumn("PDF", display_text="Ver PDF")
             }
         )
 
