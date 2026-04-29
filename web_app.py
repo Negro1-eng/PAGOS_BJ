@@ -66,6 +66,17 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# ================= NORMALIZACIÓN =================
+
+def normalizar_contrato(col):
+    return (
+        col.astype(str)
+        .str.strip()
+        .str.upper()
+        .str.replace("/", "-", regex=False)
+        .str.replace(r"\s+", "", regex=True)
+    )
+
 # ================= CARGA DE DATOS =================
 
 @st.cache_data
@@ -98,6 +109,10 @@ def cargar_datos(anio):
 
     df_contratos.columns = df_contratos.columns.str.strip()
     df_clc.columns = df_clc.columns.str.strip()
+
+    # 🔥 NORMALIZAR CONTRATOS
+    df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
+    df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
 
     # -------- DRIVE --------
     diccionario_links = {}
@@ -181,7 +196,7 @@ if st.session_state.proyecto != "Todos":
 if st.session_state.empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == st.session_state.empresa]
 
-contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().astype(str).unique())
+contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().unique())
 
 if st.session_state.contrato not in contratos:
     st.session_state.contrato = ""
@@ -212,7 +227,7 @@ st.header("Consumo del Contrato", anchor=False)
 if st.session_state.contrato:
 
     df_contrato = agrupado[
-        agrupado["N° CONTRATO"].astype(str) == st.session_state.contrato
+        agrupado["N° CONTRATO"] == st.session_state.contrato
     ]
 
     monto_contrato = df_contrato["Importe total (LC)"].iloc[0]
@@ -258,7 +273,7 @@ if st.session_state.contrato:
     st.header("CLC DEL CONTRATO", anchor=False)
 
     clc_contrato = df_clc[
-        df_clc["CONTRATO"].astype(str) == st.session_state.contrato
+        df_clc["CONTRATO"] == st.session_state.contrato
     ][[
         "CLC",
         "ESTIMACION",
@@ -270,7 +285,7 @@ if st.session_state.contrato:
     ]].copy()
 
     if clc_contrato.empty:
-        st.info("Este contrato no tiene CLC registrados")
+        st.warning("⚠️ Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
     else:
         total_clc = clc_contrato["MONTO"].sum()
         clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
