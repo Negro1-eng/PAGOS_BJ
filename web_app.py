@@ -279,8 +279,6 @@ if not agrupado.empty:
     tabla = agrupado[[
         "N° CONTRATO",
         "DESCRIPCION",
-        "PARTIDA",
-        "DESC PARTIDA",
         "Importe total (LC)",
         "% PAGADO",
         "% PENDIENTE POR EJERCER"
