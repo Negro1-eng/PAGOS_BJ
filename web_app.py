@@ -211,8 +211,8 @@ st.header("Filtros", anchor=False)
 c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
 
 with c1:
-    proyectos = ["Todos"] + sorted(df["DESC PROYECTO"].dropna().unique())
-    st.selectbox("DESCRIPCION DE PROGRAMA", proyectos, key="proyecto")
+    proyectos = ["Todos"] + sorted(df["DESC PARTIDA"].dropna().unique())
+    st.selectbox("DESCRIPCION DE PARTIDA", proyectos, key="PARTIDA")
 
 with c2:
     empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
@@ -221,7 +221,7 @@ with c2:
 resultado = df.copy()
 
 if st.session_state.proyecto != "Todos":
-    resultado = resultado[resultado["DESC PROYECTO"] == st.session_state.proyecto]
+    resultado = resultado[resultado["DESC PARTIDA"] == st.session_state.proyecto]
 
 if st.session_state.empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == st.session_state.empresa]
@@ -317,7 +317,7 @@ if st.session_state.contrato:
     ]].copy()
 
     if clc_contrato.empty:
-        st.warning("⚠️ Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
+        st.warning(" Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
     else:
         total_clc = clc_contrato["MONTO"].sum()
         clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
