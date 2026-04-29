@@ -32,7 +32,7 @@ CONFIG_ANIOS = {
     },
     "2026": {
         "sheet_id": "1-xq9SMUmxaDmCEmmMmahJa28wOHsuqoAgyly3HiNMNc/edit?gid=0#gid=0",
-        "folder_id": "1xgK3R9cX0zHllQDcJ1x8z100tKB_9EAu"
+        "folder_id": "1-xq9SMUmxaDmCEmmMmahJa28wOHsuqoAgyly3HiNMNc"
     }
 }
 
