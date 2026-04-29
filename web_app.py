@@ -7,7 +7,7 @@ import re
 
 # ================= CONFIGURACIÓN =================
 st.set_page_config(
-    page_title="Buscador de Consumo de Contratos",
+    page_title="Consumo de Contratos BJ 2026",
     layout="wide"
 )
 
