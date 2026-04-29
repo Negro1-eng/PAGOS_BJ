@@ -103,12 +103,15 @@ def cargar_datos(anio):
 
     ws_contratos = sh.get_worksheet(0)
     ws_clc = sh.worksheet("CLC_CONTRATOS")
+    ws_evolucion = sh.worksheet("EVOLUCION")
 
     df_contratos = pd.DataFrame(ws_contratos.get_all_records())
     df_clc = pd.DataFrame(ws_clc.get_all_records())
+    df_evolucion = pd.DataFrame(ws_evolucion.get_all_records())
 
     df_contratos.columns = df_contratos.columns.str.strip()
     df_clc.columns = df_clc.columns.str.strip()
+    df_evolucion.columns = df_evolucion.columns.str.strip()
 
     # 🔥 NORMALIZAR CONTRATOS
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
@@ -145,10 +148,10 @@ def cargar_datos(anio):
     df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
     df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
 
-    return df_contratos, df_clc
+    return df_contratos, df_clc, df_evolucion
 
 
-df, df_clc = cargar_datos(anio)
+df, df_clc, df_evolucion = cargar_datos(anio)
 
 # ================= NORMALIZAR NUMÉRICOS =================
 
@@ -181,8 +184,14 @@ st.header("Filtros", anchor=False)
 c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
 
 with c1:
-    proyectos = ["Todos"] + sorted(df["DESC PROYECTO"].dropna().unique())
-    st.selectbox("DESCRIPCION DE PROGRAMA", proyectos, key="proyecto")
+    df_evolucion["FILTRO"] = (
+        df_evolucion["PARTIDA"].astype(str) + " - " +
+        df_evolucion["DESCRIPCION"].astype(str)
+    )
+
+    proyectos = ["Todos"] + sorted(df_evolucion["FILTRO"].dropna().unique())
+
+    st.selectbox("PARTIDA / DESCRIPCION", proyectos, key="proyecto")
 
 with c2:
     empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
@@ -190,8 +199,13 @@ with c2:
 
 resultado = df.copy()
 
+# 🔥 FILTRO POR PARTIDA (desde EVOLUCION)
 if st.session_state.proyecto != "Todos":
-    resultado = resultado[resultado["DESC PROYECTO"] == st.session_state.proyecto]
+    partida_sel = st.session_state.proyecto.split(" - ")[0]
+
+    resultado = resultado[
+        resultado["PARTIDA"].astype(str) == partida_sel
+    ]
 
 if st.session_state.empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == st.session_state.empresa]
@@ -246,13 +260,15 @@ else:
 
 if not agrupado.empty:
 
-    tabla = agrupado[[
-        "N° CONTRATO",
-        "DESCRIPCION",
-        "Importe total (LC)",
-        "% PAGADO",
-        "% PENDIENTE POR EJERCER"
-    ]].copy()
+    tabla = agrupado[
+        [
+            "N° CONTRATO",
+            "DESCRIPCION",
+            "Importe total (LC)",
+            "% PAGADO",
+            "% PENDIENTE POR EJERCER"
+        ]
+    ].copy()
 
     tabla["Importe total (LC)"] = tabla["Importe total (LC)"].apply(formato_pesos)
 
@@ -274,20 +290,23 @@ if st.session_state.contrato:
 
     clc_contrato = df_clc[
         df_clc["CONTRATO"] == st.session_state.contrato
-    ][[
-        "CLC",
-        "ESTIMACION",
-        "Fecha de Compen.",
-        "Doc. Compen.",
-        "FACTURA",
-        "MONTO",
-        "PDF"
-    ]].copy()
+    ][
+        [
+            "CLC",
+            "ESTIMACION",
+            "Fecha de Compen.",
+            "Doc. Compen.",
+            "FACTURA",
+            "MONTO",
+            "PDF"
+        ]
+    ].copy()
 
     if clc_contrato.empty:
         st.warning("⚠️ Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
     else:
         total_clc = clc_contrato["MONTO"].sum()
+
         clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
 
         st.dataframe(
