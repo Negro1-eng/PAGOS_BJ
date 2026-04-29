@@ -45,41 +45,23 @@ def formato_pesos(x):
 def normalizar_clave(col):
     return col.astype(str).str.strip()
 
-def cargar_hoja_como_df(worksheet):
-    values = worksheet.get_all_values()
+def cargar_rango_como_df(worksheet, rango):
+    values = worksheet.get(rango)
+
     if not values:
         return pd.DataFrame()
 
     encabezados = values[0]
     filas = values[1:]
 
-    max_cols = len(encabezados)
+    total_cols = len(encabezados)
     filas_ajustadas = []
     for fila in filas:
-        fila = fila[:max_cols] + [""] * max(0, max_cols - len(fila))
+        fila = fila[:total_cols] + [""] * max(0, total_cols - len(fila))
         filas_ajustadas.append(fila)
 
     df = pd.DataFrame(filas_ajustadas, columns=encabezados)
-    df = limpiar_columnas(df)
-    return df
-
-def obtener_columna(df, candidatos):
-    columnas_norm = {normalizar_texto(col): col for col in df.columns}
-    for candidato in candidatos:
-        key = normalizar_texto(candidato)
-        if key in columnas_norm:
-            return columnas_norm[key]
-
-    for col in df.columns:
-        col_norm = normalizar_texto(col)
-        for candidato in candidatos:
-            cand_norm = normalizar_texto(candidato)
-            if cand_norm in col_norm or col_norm in cand_norm:
-                return col
-
-    st.error(f"No encontré ninguna de estas columnas: {candidatos}")
-    st.write("Columnas detectadas:", list(df.columns))
-    st.stop()
+    return limpiar_columnas(df)
 
 @st.cache_data
 def cargar_datos(anio):
@@ -93,21 +75,38 @@ def cargar_datos(anio):
 
     client = gspread.authorize(creds)
     service = build("drive", "v3", credentials=creds)
-
     sh = client.open_by_key(CONFIG_ANIOS[anio]["sheet_id"])
 
-    df = cargar_hoja_como_df(sh.get_worksheet(0))
-    df_evolucion = cargar_hoja_como_df(sh.worksheet("Evolucion"))
-    df_clc = cargar_hoja_como_df(sh.worksheet("CLC_CONTRATOS"))
+    # Fuerza lectura hasta la columna R
+    df = cargar_rango_como_df(sh.get_worksheet(0), "A:R")
+    df_evolucion = cargar_rango_como_df(sh.worksheet("Evolucion"), "A:F")
+    df_clc = pd.DataFrame(sh.worksheet("CLC_CONTRATOS").get_all_records())
+    df_clc = limpiar_columnas(df_clc)
 
-    col_partida_df = obtener_columna(df, ["PARTIDA"])
-    col_partida_evo = obtener_columna(df_evolucion, ["PARTIDA"])
-    col_empresa = obtener_columna(df, ["EMPRESA"])
-    col_contrato = obtener_columna(df, ["N° CONTRATO", "NO CONTRATO", "CONTRATO"])
-    col_descripcion = obtener_columna(df, ["DESCRIPCION"])
-    col_importe_total = obtener_columna(df, ["IMPORTE TOTAL (LC)", "IMPORTE TOTAL"])
-    col_abrir_importe = obtener_columna(df, ["ABRIR IMPORTE (LC)", "ABRIR IMPORTE"])
-    col_ejercido_df = obtener_columna(df, ["EJERCIDO"])
+    st.write("Columnas hoja 1:", list(df.columns))
+    st.write("Columnas evolucion:", list(df_evolucion.columns))
+
+    col_partida_df = "PARTIDA"
+    col_desc_partida_df = "DESC PARTIDA"
+    col_partida_evo = "PARTIDA"
+    col_empresa = "EMPRESA"
+    col_contrato = "NO CONTRATO"
+    col_descripcion = "DESCRIPCION"
+    col_importe_total = "IMPORTE TOTAL (LC)"
+    col_abrir_importe = "ABRIR IMPORTE (LC)"
+    col_ejercido_df = "EJERCIDO"
+
+    if col_partida_df not in df.columns:
+        st.error(f"No se encontró '{col_partida_df}' en hoja 1")
+        st.stop()
+
+    if col_desc_partida_df not in df.columns:
+        st.error(f"No se encontró '{col_desc_partida_df}' en hoja 1")
+        st.stop()
+
+    if col_partida_evo not in df_evolucion.columns:
+        st.error(f"No se encontró '{col_partida_evo}' en hoja Evolucion")
+        st.stop()
 
     df[col_partida_df] = normalizar_clave(df[col_partida_df])
     df_evolucion[col_partida_evo] = normalizar_clave(df_evolucion[col_partida_evo])
@@ -136,6 +135,7 @@ def cargar_datos(anio):
         df_evolucion,
         df_clc,
         col_partida_df,
+        col_desc_partida_df,
         col_partida_evo,
         col_empresa,
         col_contrato,
@@ -150,6 +150,7 @@ def cargar_datos(anio):
     df_evolucion,
     df_clc,
     col_partida_df,
+    col_desc_partida_df,
     col_partida_evo,
     col_empresa,
     col_contrato,
@@ -209,7 +210,7 @@ if filtro != "Todos":
         e4.metric("Ejercido", formato_pesos(evo.get("EJERCIDO", 0)))
 
 agrupado = resultado.groupby(
-    [col_contrato, col_descripcion],
+    [col_contrato, col_descripcion, col_partida_df, col_desc_partida_df],
     as_index=False
 ).agg({
     col_importe_total: "max",
@@ -217,15 +218,17 @@ agrupado = resultado.groupby(
     col_abrir_importe: "sum"
 })
 
-agrupado = agrupado.rename(columns={
-    col_contrato: "N° CONTRATO",
-    col_descripcion: "DESCRIPCION",
-    col_importe_total: "IMPORTE TOTAL (LC)",
-    col_ejercido_df: "EJERCIDO",
-    col_abrir_importe: "ABRIR IMPORTE (LC)"
-})
+agrupado["IMPORTE TOTAL (LC)"] = agrupado[col_importe_total].apply(formato_pesos)
+agrupado["EJERCIDO"] = agrupado[col_ejercido_df].apply(formato_pesos)
+agrupado["ABRIR IMPORTE (LC)"] = agrupado[col_abrir_importe].apply(formato_pesos)
 
-st.dataframe(agrupado, use_container_width=True)
+st.dataframe(
+    agrupado[
+        [col_contrato, col_descripcion, col_partida_df, col_desc_partida_df,
+         "IMPORTE TOTAL (LC)", "EJERCIDO", "ABRIR IMPORTE (LC)"]
+    ],
+    use_container_width=True
+)
 
 if contrato and "CONTRATO" in df_clc.columns:
     clc = df_clc[df_clc["CONTRATO"].astype(str).str.strip() == str(contrato)].copy()
