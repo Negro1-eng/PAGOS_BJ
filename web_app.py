@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import re
+import unicodedata
 
 st.set_page_config(page_title="Consumo de Contratos", layout="wide")
 st.header("Consumo de Contratos")
@@ -18,12 +19,26 @@ CONFIG_ANIOS = {
 anio = st.selectbox("Ejercicio fiscal", list(CONFIG_ANIOS.keys()))
 
 # ================= FUNCIONES =================
+def normalizar_texto(texto):
+    texto = str(texto).strip().upper()
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    texto = re.sub(r"\s+", " ", texto)
+    return texto
+
 def limpiar_columnas(df):
-    df.columns = df.columns.str.strip().str.upper()
+    df.columns = [normalizar_texto(col) for col in df.columns]
     return df
 
+def obtener_columna(df, posibles_nombres):
+    columnas_norm = {normalizar_texto(col): col for col in df.columns}
+    for nombre in posibles_nombres:
+        nombre_norm = normalizar_texto(nombre)
+        if nombre_norm in columnas_norm:
+            return columnas_norm[nombre_norm]
+    raise KeyError(f"No se encontro ninguna de estas columnas: {posibles_nombres}. Columnas reales: {list(df.columns)}")
+
 def limpiar_monto(col):
-    return col.astype(str).str.replace("$", "").str.replace(",", "")
+    return col.astype(str).str.replace("$", "", regex=False).str.replace(",", "", regex=False)
 
 def formato_pesos(x):
     return f"$ {x:,.2f}"
@@ -34,7 +49,6 @@ def normalizar_clave(col):
 # ================= CARGA =================
 @st.cache_data
 def cargar_datos(anio):
-
     creds = Credentials.from_service_account_info(
         st.secrets["google_service_account"],
         scopes=[
@@ -56,11 +70,12 @@ def cargar_datos(anio):
     df_evolucion = limpiar_columnas(df_evolucion)
     df_clc = limpiar_columnas(df_clc)
 
-    # 🔥 NORMALIZAR PARTIDAS
-    df["N° PARTIDA"] = normalizar_clave(df["N° PARTIDA"])
-    df_evolucion["PARTIDA"] = normalizar_clave(df_evolucion["PARTIDA"])
+    col_partida_df = obtener_columna(df, ["N° PARTIDA", "Nº PARTIDA", "NO PARTIDA", "PARTIDA"])
+    col_partida_evo = obtener_columna(df_evolucion, ["PARTIDA", "NO PARTIDA", "N° PARTIDA"])
 
-    # ================= DRIVE =================
+    df[col_partida_df] = normalizar_clave(df[col_partida_df])
+    df_evolucion[col_partida_evo] = normalizar_clave(df_evolucion[col_partida_evo])
+
     diccionario_links = {}
     folder_id = CONFIG_ANIOS[anio]["folder_id"]
 
@@ -77,10 +92,10 @@ def cargar_datos(anio):
     df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
     df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
 
-    return df, df_evolucion, df_clc
+    return df, df_evolucion, df_clc, col_partida_df, col_partida_evo
 
 
-df, df_evolucion, df_clc = cargar_datos(anio)
+df, df_evolucion, df_clc, col_partida_df, col_partida_evo = cargar_datos(anio)
 
 # ================= NUMÉRICOS =================
 for col in ["IMPORTE TOTAL (LC)", "EJERCIDO", "ABRIR IMPORTE (LC)"]:
@@ -97,13 +112,12 @@ st.header("Filtros")
 c1, c2, c3 = st.columns(3)
 
 with c1:
-    df_evolucion["FILTRO"] = df_evolucion["PARTIDA"] + " - " + df_evolucion["PARTIDA"]
-    filtro = st.selectbox("PARTIDA", ["Todos"] + sorted(df_evolucion["PARTIDA"].unique()))
+    filtro = st.selectbox("PARTIDA", ["Todos"] + sorted(df_evolucion[col_partida_evo].dropna().unique()))
 
 resultado = df.copy()
 
 if filtro != "Todos":
-    resultado = resultado[resultado["N° PARTIDA"] == filtro]
+    resultado = resultado[resultado[col_partida_df] == filtro]
 
 with c2:
     empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
@@ -118,14 +132,14 @@ with c3:
 
 # ================= EVOLUCIÓN =================
 if filtro != "Todos":
-    evo = df_evolucion[df_evolucion["PARTIDA"] == filtro]
+    evo = df_evolucion[df_evolucion[col_partida_evo] == filtro]
 
     if not evo.empty:
         evo = evo.iloc[0]
 
         st.subheader("Evolución por partida")
 
-        e1,e2,e3,e4 = st.columns(4)
+        e1, e2, e3, e4 = st.columns(4)
         e1.metric("Original", formato_pesos(evo["ORIGINAL"]))
         e2.metric("Modificado", formato_pesos(evo["MODIFICADO"]))
         e3.metric("Comprometido", formato_pesos(evo["COMPROMETIDO"]))
@@ -145,7 +159,7 @@ st.dataframe(agrupado, use_container_width=True)
 
 # ================= CLC =================
 if contrato:
-    clc = df_clc[df_clc["CONTRATO"].astype(str) == contrato]
+    clc = df_clc[df_clc["CONTRATO"].astype(str) == contrato].copy()
 
     if not clc.empty:
         clc["MONTO"] = clc["MONTO"].apply(formato_pesos)
