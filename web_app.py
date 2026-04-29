@@ -11,19 +11,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# ================= ESTILOS =================
-st.markdown("""
-<style>
-header {visibility: hidden;}
-footer {visibility: hidden;}
-[data-testid="stDecoration"] {display: none !important;}
-div[data-testid="stStatusWidget"] {display: none !important;}
-</style>
-""", unsafe_allow_html=True)
-
 st.header("Consumo de Contratos", anchor=False)
 
-# ================= CONFIGURACIÓN POR AÑO =================
+# ================= CONFIG =================
 CONFIG_ANIOS = {
     "2025": {
         "sheet_id": "1q2cvx9FD1CW8XP_kZpsFvfKtu4QdrJPqKAZuueHRIW4",
@@ -35,66 +25,51 @@ CONFIG_ANIOS = {
     }
 }
 
-# ================= SELECTOR DE AÑO =================
-st.header("Ejercicio fiscal", anchor=False)
+anio = st.selectbox("Ejercicio fiscal", list(CONFIG_ANIOS.keys()))
 
-anio = st.selectbox(
-    "Selecciona el año",
-    list(CONFIG_ANIOS.keys())
-)
+if st.button("Actualizar datos"):
+    st.cache_data.clear()
+    st.rerun()
 
-# ================= BOTÓN ACTUALIZAR =================
-col1, col2 = st.columns([1, 6])
-with col1:
-    if st.button("Actualizar datos"):
-        st.cache_data.clear()
-        st.success(f"Datos actualizados del ejercicio {anio}")
-        st.rerun()
+# ================= FUNCIONES =================
+def limpiar_columnas(df):
+    df.columns = df.columns.str.strip().str.upper()
+    return df
 
-# ================= ESTADO =================
-defaults = {
-    "proyecto": "Todos",
-    "empresa": "Todas",
-    "contrato": ""
-}
+def limpiar_monto(col):
+    return col.astype(str).str.replace("$", "").str.replace(",", "")
 
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+def formato_pesos(x):
+    return f"$ {x:,.2f}"
 
-# ================= CARGA DE DATOS =================
+# ================= CARGA =================
 @st.cache_data
 def cargar_datos(anio):
 
-    sheet_id = CONFIG_ANIOS[anio]["sheet_id"]
-    folder_id = CONFIG_ANIOS[anio]["folder_id"]
-
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets.readonly",
-        "https://www.googleapis.com/auth/drive.readonly"
-    ]
-
     creds = Credentials.from_service_account_info(
         st.secrets["google_service_account"],
-        scopes=scopes
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/drive.readonly"
+        ]
     )
 
     client = gspread.authorize(creds)
     service = build("drive", "v3", credentials=creds)
 
-    ws_contratos = client.open_by_key(sheet_id).get_worksheet(0)
-    ws_evolucion = client.open_by_key(sheet_id).worksheet("Evolucion")
-    ws_clc = client.open_by_key(sheet_id).worksheet("CLC_CONTRATOS")
+    sh = client.open_by_key(CONFIG_ANIOS[anio]["sheet_id"])
 
-    df_contratos = pd.DataFrame(ws_contratos.get_all_records())
-    df_evolucion = pd.DataFrame(ws_evolucion.get_all_records())
-    df_clc = pd.DataFrame(ws_clc.get_all_records())
+    df = pd.DataFrame(sh.get_worksheet(0).get_all_records())
+    df_evolucion = pd.DataFrame(sh.worksheet("Evolucion").get_all_records())
+    df_clc = pd.DataFrame(sh.worksheet("CLC_CONTRATOS").get_all_records())
 
-    df_contratos.columns = df_contratos.columns.str.strip()
-    df_evolucion.columns = df_evolucion.columns.str.strip()
-    df_clc.columns = df_clc.columns.str.strip()
+    # 🔥 LIMPIAR COLUMNAS (SOLUCIONA TU ERROR)
+    df = limpiar_columnas(df)
+    df_evolucion = limpiar_columnas(df_evolucion)
+    df_clc = limpiar_columnas(df_clc)
 
-    # -------- DRIVE --------
+    # ================= DRIVE =================
+    folder_id = CONFIG_ANIOS[anio]["folder_id"]
     diccionario_links = {}
     page_token = None
 
@@ -106,87 +81,77 @@ def cargar_datos(anio):
             pageToken=page_token
         ).execute()
 
-        for file in response.get("files", []):
-            match = re.search(r"\d+", file["name"])
+        for f in response.get("files", []):
+            match = re.search(r"\d+", f["name"])
             if match:
-                diccionario_links[match.group()] = f"https://drive.google.com/file/d/{file['id']}/view"
+                diccionario_links[match.group()] = f"https://drive.google.com/file/d/{f['id']}/view"
 
-        page_token = response.get("nextPageToken", None)
-        if page_token is None:
+        page_token = response.get("nextPageToken")
+        if not page_token:
             break
 
-    df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
-    df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
+    if "CLC" in df_clc.columns:
+        df_clc["CLC"] = df_clc["CLC"].astype(str).str.strip()
+        df_clc["PDF"] = df_clc["CLC"].map(diccionario_links)
 
-    return df_contratos, df_evolucion, df_clc
+    return df, df_evolucion, df_clc
 
 
 df, df_evolucion, df_clc = cargar_datos(anio)
 
-# ================= LIMPIEZA NUMÉRICA =================
-def limpiar_monto(col):
-    return col.astype(str).str.replace("$", "").str.replace(",", "")
-
-for col in ["Importe total (LC)", "EJERCIDO", "Abrir importe (LC)"]:
-    df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
+# ================= NUMÉRICOS =================
+for col in ["IMPORTE TOTAL (LC)", "EJERCIDO", "ABRIR IMPORTE (LC)"]:
+    if col in df.columns:
+        df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
 
 for col in ["ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]:
-    df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
+    if col in df_evolucion.columns:
+        df_evolucion[col] = pd.to_numeric(limpiar_monto(df_evolucion[col]), errors="coerce").fillna(0)
 
-df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
-
-# ================= FUNCIONES =================
-def formato_pesos(valor):
-    return f"$ {valor:,.2f}"
-
-def limpiar_filtros():
-    st.session_state.proyecto = "Todos"
-    st.session_state.empresa = "Todas"
-    st.session_state.contrato = ""
+if "MONTO" in df_clc.columns:
+    df_clc["MONTO"] = pd.to_numeric(limpiar_monto(df_clc["MONTO"]), errors="coerce").fillna(0)
 
 # ================= FILTROS =================
-st.header("Filtros", anchor=False)
+st.header("Filtros")
 
-c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
+c1, c2, c3, c4 = st.columns([3,3,3,1])
 
 with c1:
     df_evolucion["FILTRO"] = df_evolucion["PARTIDA"].astype(str) + " - " + df_evolucion["DESCRIPCION"].astype(str)
-    proyectos = ["Todos"] + sorted(df_evolucion["FILTRO"].dropna().unique())
-    st.selectbox("PARTIDA / DESCRIPCION", proyectos, key="proyecto")
+    opciones = ["Todos"] + sorted(df_evolucion["FILTRO"].unique())
+    filtro = st.selectbox("PARTIDA / DESCRIPCION", opciones)
 
 with c2:
     empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
-    st.selectbox("EMPRESA", empresas, key="empresa")
+    empresa = st.selectbox("EMPRESA", empresas)
 
 resultado = df.copy()
 
-if st.session_state.proyecto != "Todos":
-    partida_sel = st.session_state.proyecto.split(" - ")[0]
-    resultado = resultado[resultado["PARTIDA"].astype(str) == partida_sel]
+if filtro != "Todos":
+    partida = filtro.split(" - ")[0]
+    resultado = resultado[resultado["PARTIDA"].astype(str) == partida]
 
-if st.session_state.empresa != "Todas":
-    resultado = resultado[resultado["EMPRESA"] == st.session_state.empresa]
+if empresa != "Todas":
+    resultado = resultado[resultado["EMPRESA"] == empresa]
 
 contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().astype(str).unique())
 
-if st.session_state.contrato not in contratos:
-    st.session_state.contrato = ""
-
 with c3:
-    st.selectbox("N° CONTRATO", contratos, key="contrato")
+    contrato = st.selectbox("CONTRATO", contratos)
 
 with c4:
-    st.button("Limpiar Filtros", on_click=limpiar_filtros)
+    if st.button("Limpiar"):
+        st.rerun()
 
 # ================= EVOLUCIÓN =================
-if st.session_state.proyecto != "Todos":
-    partida_sel = st.session_state.proyecto.split(" - ")[0]
-    evo = df_evolucion[df_evolucion["PARTIDA"].astype(str) == partida_sel]
+if filtro != "Todos":
+    partida = filtro.split(" - ")[0]
+    evo = df_evolucion[df_evolucion["PARTIDA"].astype(str) == partida]
 
     if not evo.empty:
         evo = evo.iloc[0]
 
-        st.subheader("Evolución presupuestal por partida")
+        st.subheader("Evolución presupuestal")
 
         e1, e2, e3, e4 = st.columns(4)
         e1.metric("Original", formato_pesos(evo["ORIGINAL"]))
@@ -194,61 +159,44 @@ if st.session_state.proyecto != "Todos":
         e3.metric("Comprometido", formato_pesos(evo["COMPROMETIDO"]))
         e4.metric("Ejercido", formato_pesos(evo["EJERCIDO"]))
 
-# ================= AGRUPAR =================
+# ================= AGRUPADO =================
 agrupado = resultado.groupby(
     ["N° CONTRATO", "DESCRIPCION"],
     as_index=False
 ).agg({
-    "Importe total (LC)": "max",
+    "IMPORTE TOTAL (LC)": "max",
     "EJERCIDO": "sum",
-    "Abrir importe (LC)": "sum",
-    "% PAGADO": "first",
-    "% PENDIENTE POR EJERCER": "first"
+    "ABRIR IMPORTE (LC)": "sum"
 })
 
 # ================= CONSUMO =================
-st.header("Consumo del Contrato", anchor=False)
+st.header("Consumo del contrato")
 
-if st.session_state.contrato:
-    df_contrato = agrupado[agrupado["N° CONTRATO"].astype(str) == st.session_state.contrato]
+if contrato:
+    d = agrupado[agrupado["N° CONTRATO"].astype(str) == contrato]
 
-    monto_contrato = df_contrato["Importe total (LC)"].iloc[0]
-    monto_ejercido = df_contrato["EJERCIDO"].iloc[0]
-    monto_pendiente = df_contrato["Abrir importe (LC)"].iloc[0]
-
-    a, b, c = st.columns(3)
-    a.metric("Importe del contrato", formato_pesos(monto_contrato))
-    b.metric("Importe ejercido", formato_pesos(monto_ejercido))
-    c.metric("Importe pendiente", formato_pesos(monto_pendiente))
-
-else:
-    st.info("Selecciona un contrato para ver el consumo")
+    if not d.empty:
+        a,b,c = st.columns(3)
+        a.metric("Contrato", formato_pesos(d["IMPORTE TOTAL (LC)"].iloc[0]))
+        b.metric("Ejercido", formato_pesos(d["EJERCIDO"].iloc[0]))
+        c.metric("Pendiente", formato_pesos(d["ABRIR IMPORTE (LC)"].iloc[0]))
 
 # ================= TABLA =================
-tabla = agrupado.copy()
-tabla["Importe total (LC)"] = tabla["Importe total (LC)"].apply(formato_pesos)
-
-st.dataframe(tabla, use_container_width=True)
+st.dataframe(agrupado, use_container_width=True)
 
 # ================= CLC =================
-if st.session_state.contrato:
+if contrato:
+    st.subheader("CLC")
 
-    st.header("CLC DEL CONTRATO", anchor=False)
+    clc = df_clc[df_clc["CONTRATO"].astype(str) == contrato]
 
-    clc_contrato = df_clc[df_clc["CONTRATO"].astype(str) == st.session_state.contrato].copy()
-
-    if clc_contrato.empty:
-        st.info("Este contrato no tiene CLC registrados")
-    else:
-        total_clc = clc_contrato["MONTO"].sum()
-        clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
+    if not clc.empty:
+        clc["MONTO"] = clc["MONTO"].apply(formato_pesos)
 
         st.dataframe(
-            clc_contrato,
-            use_container_width=True,
+            clc,
             column_config={
                 "PDF": st.column_config.LinkColumn("PDF", display_text="Ver PDF")
-            }
+            },
+            use_container_width=True
         )
-
-        st.markdown(f"### **Total CLC:** {formato_pesos(total_clc)}")
