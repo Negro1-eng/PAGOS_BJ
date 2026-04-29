@@ -5,15 +5,10 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import re
 
-# ================= CONFIGURACIÓN =================
-st.set_page_config(
-    page_title="Buscador de Consumo de Contratos",
-    layout="wide"
-)
-
-st.header("Consumo de Contratos", anchor=False)
-
 # ================= CONFIG =================
+st.set_page_config(page_title="Consumo de Contratos", layout="wide")
+st.header("Consumo de Contratos")
+
 CONFIG_ANIOS = {
     "2025": {
         "sheet_id": "1q2cvx9FD1CW8XP_kZpsFvfKtu4QdrJPqKAZuueHRIW4",
@@ -42,6 +37,12 @@ def limpiar_monto(col):
 def formato_pesos(x):
     return f"$ {x:,.2f}"
 
+def buscar_columna(df, nombre):
+    for col in df.columns:
+        if nombre in col.upper():
+            return col
+    return None
+
 # ================= CARGA =================
 @st.cache_data
 def cargar_datos(anio):
@@ -63,12 +64,11 @@ def cargar_datos(anio):
     df_evolucion = pd.DataFrame(sh.worksheet("Evolucion").get_all_records())
     df_clc = pd.DataFrame(sh.worksheet("CLC_CONTRATOS").get_all_records())
 
-    # 🔥 LIMPIAR COLUMNAS (SOLUCIONA TU ERROR)
     df = limpiar_columnas(df)
     df_evolucion = limpiar_columnas(df_evolucion)
     df_clc = limpiar_columnas(df_clc)
 
-    # ================= DRIVE =================
+    # DRIVE LINKS
     folder_id = CONFIG_ANIOS[anio]["folder_id"]
     diccionario_links = {}
     page_token = None
@@ -99,7 +99,13 @@ def cargar_datos(anio):
 
 df, df_evolucion, df_clc = cargar_datos(anio)
 
-# ================= NUMÉRICOS =================
+# ================= DETECTAR COLUMNAS =================
+col_partida_evo = buscar_columna(df_evolucion, "PARTIDA")
+col_desc_evo = buscar_columna(df_evolucion, "DESCRIP")
+
+col_partida_df = buscar_columna(df, "PARTIDA")
+
+# ================= LIMPIAR NUMÉRICOS =================
 for col in ["IMPORTE TOTAL (LC)", "EJERCIDO", "ABRIR IMPORTE (LC)"]:
     if col in df.columns:
         df[col] = pd.to_numeric(limpiar_monto(df[col]), errors="coerce").fillna(0)
@@ -117,24 +123,33 @@ st.header("Filtros")
 c1, c2, c3, c4 = st.columns([3,3,3,1])
 
 with c1:
-    df_evolucion["FILTRO"] = df_evolucion["PARTIDA"].astype(str) + " - " + df_evolucion["DESCRIPCION"].astype(str)
-    opciones = ["Todos"] + sorted(df_evolucion["FILTRO"].unique())
+    if col_partida_evo and col_desc_evo:
+        df_evolucion["FILTRO"] = (
+            df_evolucion[col_partida_evo].astype(str).str.strip()
+            + " - " +
+            df_evolucion[col_desc_evo].astype(str).str.strip()
+        )
+        opciones = ["Todos"] + sorted(df_evolucion["FILTRO"].unique())
+    else:
+        st.error("No se detectó PARTIDA o DESCRIPCION")
+        opciones = ["Todos"]
+
     filtro = st.selectbox("PARTIDA / DESCRIPCION", opciones)
 
 with c2:
-    empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
+    empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique()) if "EMPRESA" in df.columns else ["Todas"]
     empresa = st.selectbox("EMPRESA", empresas)
 
 resultado = df.copy()
 
-if filtro != "Todos":
+if filtro != "Todos" and col_partida_df:
     partida = filtro.split(" - ")[0]
-    resultado = resultado[resultado["PARTIDA"].astype(str) == partida]
+    resultado = resultado[resultado[col_partida_df].astype(str).str.strip() == partida]
 
 if empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == empresa]
 
-contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().astype(str).unique())
+contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().astype(str).unique()) if "N° CONTRATO" in df.columns else [""]
 
 with c3:
     contrato = st.selectbox("CONTRATO", contratos)
@@ -144,35 +159,38 @@ with c4:
         st.rerun()
 
 # ================= EVOLUCIÓN =================
-if filtro != "Todos":
+if filtro != "Todos" and col_partida_evo:
     partida = filtro.split(" - ")[0]
-    evo = df_evolucion[df_evolucion["PARTIDA"].astype(str) == partida]
+    evo = df_evolucion[df_evolucion[col_partida_evo].astype(str).str.strip() == partida]
 
     if not evo.empty:
         evo = evo.iloc[0]
 
         st.subheader("Evolución presupuestal")
 
-        e1, e2, e3, e4 = st.columns(4)
+        e1,e2,e3,e4 = st.columns(4)
         e1.metric("Original", formato_pesos(evo["ORIGINAL"]))
         e2.metric("Modificado", formato_pesos(evo["MODIFICADO"]))
         e3.metric("Comprometido", formato_pesos(evo["COMPROMETIDO"]))
         e4.metric("Ejercido", formato_pesos(evo["EJERCIDO"]))
 
 # ================= AGRUPADO =================
-agrupado = resultado.groupby(
-    ["N° CONTRATO", "DESCRIPCION"],
-    as_index=False
-).agg({
-    "IMPORTE TOTAL (LC)": "max",
-    "EJERCIDO": "sum",
-    "ABRIR IMPORTE (LC)": "sum"
-})
+if "DESCRIPCION" in df.columns:
+    agrupado = resultado.groupby(
+        ["N° CONTRATO", "DESCRIPCION"],
+        as_index=False
+    ).agg({
+        "IMPORTE TOTAL (LC)": "max",
+        "EJERCIDO": "sum",
+        "ABRIR IMPORTE (LC)": "sum"
+    })
+else:
+    agrupado = pd.DataFrame()
 
 # ================= CONSUMO =================
 st.header("Consumo del contrato")
 
-if contrato:
+if contrato and not agrupado.empty:
     d = agrupado[agrupado["N° CONTRATO"].astype(str) == contrato]
 
     if not d.empty:
@@ -182,10 +200,11 @@ if contrato:
         c.metric("Pendiente", formato_pesos(d["ABRIR IMPORTE (LC)"].iloc[0]))
 
 # ================= TABLA =================
-st.dataframe(agrupado, use_container_width=True)
+if not agrupado.empty:
+    st.dataframe(agrupado, use_container_width=True)
 
 # ================= CLC =================
-if contrato:
+if contrato and not df_clc.empty:
     st.subheader("CLC")
 
     clc = df_clc[df_clc["CONTRATO"].astype(str) == contrato]
