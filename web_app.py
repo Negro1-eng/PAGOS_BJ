@@ -75,8 +75,13 @@ def normalizar_contrato(col):
 def normalizar_texto(texto):
     return str(texto).strip()
 
-def normalizar_clave(col):
-    return col.astype(str).str.strip()
+def normalizar_partida(col):
+    return (
+        col.astype(str)
+        .str.strip()
+        .str.replace(".0", "", regex=False)
+        .str.replace(r"\s+", "", regex=True)
+    )
 
 def cargar_rango_como_df(worksheet, rango):
     values = worksheet.get(rango)
@@ -136,8 +141,8 @@ def cargar_datos(anio):
     if "DESC PARTIDA" not in df_contratos.columns:
         df_contratos["DESC PARTIDA"] = ""
 
-    df_contratos["PARTIDA"] = normalizar_clave(df_contratos["PARTIDA"])
-    df_evolucion["PARTIDA"] = normalizar_clave(df_evolucion["PARTIDA"])
+    df_contratos["PARTIDA"] = normalizar_partida(df_contratos["PARTIDA"])
+    df_evolucion["PARTIDA"] = normalizar_partida(df_evolucion["PARTIDA"])
 
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
     df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
@@ -208,11 +213,11 @@ st.header("Filtros", anchor=False)
 c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
 
 with c1:
-    proyectos = ["Todos"] + sorted(df["DESC PARTIDA"].dropna().unique())
+    proyectos = ["Todos"] + sorted(df["DESC PARTIDA"].dropna().astype(str).unique())
     st.selectbox("DESCRIPCION DE PARTIDA", proyectos, key="proyecto")
 
 with c2:
-    empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().unique())
+    empresas = ["Todas"] + sorted(df["EMPRESA"].dropna().astype(str).unique())
     st.selectbox("EMPRESA", empresas, key="empresa")
 
 resultado = df.copy()
@@ -223,7 +228,7 @@ if st.session_state.proyecto != "Todos":
 if st.session_state.empresa != "Todas":
     resultado = resultado[resultado["EMPRESA"] == st.session_state.empresa]
 
-contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().unique())
+contratos = [""] + sorted(resultado["N° CONTRATO"].dropna().astype(str).unique())
 
 if st.session_state.contrato not in contratos:
     st.session_state.contrato = ""
@@ -236,26 +241,33 @@ with c4:
 
 # ================= EVOLUCIÓN =================
 if st.session_state.proyecto != "Todos":
-    partida_seleccionada = (
-        resultado["PARTIDA"].dropna().astype(str).iloc[0]
-        if not resultado.empty else None
+    partidas_seleccionadas = (
+        resultado["PARTIDA"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
     )
 
-    if partida_seleccionada:
-        evo = df_evolucion[df_evolucion["PARTIDA"].astype(str) == str(partida_seleccionada)]
+    evo = df_evolucion[
+        df_evolucion["PARTIDA"].astype(str).isin(partidas_seleccionadas)
+    ].copy()
 
-        if not evo.empty:
-            evo = evo.iloc[0]
+    if not evo.empty:
+        st.header("Evolución de la Partida", anchor=False)
 
-            st.header("Evolución de la Partida", anchor=False)
+        original = evo["ORIGINAL"].sum() if "ORIGINAL" in evo.columns else 0
+        modificado = evo["MODIFICADO"].sum() if "MODIFICADO" in evo.columns else 0
+        comprometido = evo["COMPROMETIDO"].sum() if "COMPROMETIDO" in evo.columns else 0
+        ejercido_evolucion = evo["EJERCIDO"].sum() if "EJERCIDO" in evo.columns else 0
 
-            e1, e2, e3, e4 = st.columns(4)
-            e1.metric("Original", formato_pesos(evo["ORIGINAL"]))
-            e2.metric("Modificado", formato_pesos(evo["MODIFICADO"]))
-            e3.metric("Comprometido", formato_pesos(evo["COMPROMETIDO"]))
-            e4.metric("Ejercido", formato_pesos(evo["EJERCIDO"]))
-        else:
-            st.warning("No se encontraron valores en la hoja Evolucion para la partida seleccionada.")
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("Original", formato_pesos(original))
+        e2.metric("Modificado", formato_pesos(modificado))
+        e3.metric("Comprometido", formato_pesos(comprometido))
+        e4.metric("Ejercido", formato_pesos(ejercido_evolucion))
+    else:
+        st.warning("No se encontraron valores en la hoja Evolucion para las partidas seleccionadas.")
 
 # ================= AGRUPAR =================
 agrupado = resultado.groupby(
@@ -293,6 +305,8 @@ if not agrupado.empty:
     tabla = agrupado[[
         "N° CONTRATO",
         "DESCRIPCION",
+        "PARTIDA",
+        "DESC PARTIDA",
         "Importe total (LC)",
         "% PAGADO",
         "% PENDIENTE POR EJERCER"
@@ -326,7 +340,7 @@ if st.session_state.contrato:
     ]].copy()
 
     if clc_contrato.empty:
-        st.warning(" Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
+        st.warning("Este contrato no tiene CLC vinculadas (posible diferencia de formato o captura)")
     else:
         total_clc = clc_contrato["MONTO"].sum()
         clc_contrato["MONTO"] = clc_contrato["MONTO"].apply(formato_pesos)
