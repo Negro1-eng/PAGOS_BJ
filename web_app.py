@@ -139,7 +139,20 @@ def cargar_datos(anio):
 
     if "CONTRATO" in df_clc.columns:
         df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
+# ================= CRUCE CON EVOLUCION =================
 
+if "PARTIDA" in df_contratos.columns and "PARTIDA" in df_evolucion.columns:
+
+    df_contratos["PARTIDA"] = df_contratos["PARTIDA"].astype(str).str.strip()
+    df_evolucion["PARTIDA"] = df_evolucion["PARTIDA"].astype(str).str.strip()
+
+    # 🔥 Merge
+    df_contratos = df_contratos.merge(
+        df_evolucion,
+        on="PARTIDA",
+        how="left",
+        suffixes=("", "_EVOL")
+    )
     # ================= DRIVE =================
     diccionario_links = {}
     page_token = None
