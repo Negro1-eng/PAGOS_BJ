@@ -7,7 +7,7 @@ import re
 
 # ================= CONFIGURACIÓN =================
 st.set_page_config(
-    page_title="Buscador de Consumo de Contratos",
+    page_title=" Consumo de Contratos BJ 2026",
     layout="wide"
 )
 
@@ -21,7 +21,7 @@ div[data-testid="stStatusWidget"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
-st.header("Consumo de Contratos", anchor=False)
+st.header("Consumo de Contratos BJ 2026", anchor=False)
 
 # ================= CONFIGURACIÓN POR AÑO =================
 CONFIG_ANIOS = {
