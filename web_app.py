@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import re
+import os
 
 # ================= CONFIGURACIÓN =================
 st.set_page_config(
@@ -34,6 +35,9 @@ CONFIG_ANIOS = {
         "folder_id": "1xgK3R9cX0zHllQDcJ1x8z100tKB_9EAu"
     }
 }
+
+# ================= CARPETA ÚNICA DE CONTRATOS =================
+ID_CARPETA_CONTRATOS = "1wZjs0McDwHmysk3VxerS0U6hxjMOKsbx"
 
 # ================= SELECTOR DE AÑO =================
 st.header("Ejercicio fiscal", anchor=False)
@@ -213,6 +217,33 @@ def cargar_datos(anio):
     else:
         df_clc["PDF"] = None
 
+    # ================= LINKS DE CONTRATOS =================
+    diccionario_contratos = {}
+    page_token = None
+
+    while True:
+        response = service.files().list(
+            q=f"'{ID_CARPETA_CONTRATOS}' in parents and mimeType='application/pdf' and trashed=false",
+            fields="nextPageToken, files(id, name)",
+            pageSize=1000,
+            pageToken=page_token,
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True
+        ).execute()
+
+        files = response.get("files", [])
+
+        for file in files:
+            nombre_sin_extension = os.path.splitext(file["name"])[0]
+            contrato_normalizado = normalizar_contrato(pd.Series([nombre_sin_extension])).iloc[0]
+            diccionario_contratos[contrato_normalizado] = f"https://drive.google.com/file/d/{file['id']}/view"
+
+        page_token = response.get("nextPageToken")
+        if page_token is None:
+            break
+
+    df_contratos["PDF CONTRATO"] = df_contratos["N° CONTRATO"].map(diccionario_contratos)
+
     return df_contratos, df_evolucion, df_clc
 
 df, df_evolucion, df_clc = cargar_datos(anio)
@@ -295,7 +326,8 @@ agrupado = resultado.groupby(
     "EJERCIDO": "sum",
     "Abrir importe (LC)": "sum",
     "% PAGADO": "first",
-    "% PENDIENTE POR EJERCER": "first"
+    "% PENDIENTE POR EJERCER": "first",
+    "PDF CONTRATO": "first"
 })
 
 # ================= CONSUMO =================
@@ -314,6 +346,28 @@ if st.session_state.contrato:
     c.metric("Importe pendiente", formato_pesos(monto_pendiente))
 else:
     st.info("Selecciona un contrato para ver el consumo")
+
+# ================= VISUALIZAR CONTRATO =================
+if st.session_state.contrato:
+    st.header("Contrato", anchor=False)
+
+    link_contrato = None
+
+    coincidencias = df.loc[
+        df["N° CONTRATO"] == st.session_state.contrato,
+        "PDF CONTRATO"
+    ].dropna()
+
+    if not coincidencias.empty:
+        link_contrato = coincidencias.iloc[0]
+
+    if link_contrato:
+        st.link_button("Visualizar contrato", link_contrato)
+    else:
+        st.warning(
+            "No se encontró el PDF del contrato en Drive. "
+            "Verifica que el archivo PDF tenga el mismo nombre que el N° CONTRATO."
+        )
 
 # ================= TABLA =================
 if not agrupado.empty:
