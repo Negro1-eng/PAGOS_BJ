@@ -153,23 +153,72 @@ def cargar_datos(anio):
     df_contratos.columns = df_contratos.columns.str.strip()
     df_evolucion.columns = df_evolucion.columns.str.strip()
     df_clc.columns = df_clc.columns.str.strip()
+# ================= VALIDAR COLUMNAS =================
+if "PARTIDA" not in df_contratos.columns:
+    df_contratos["PARTIDA"] = ""
 
-    if "PARTIDA" not in df_contratos.columns:
-        df_contratos["PARTIDA"] = ""
+if "DESC PARTIDA" not in df_contratos.columns:
+    df_contratos["DESC PARTIDA"] = ""
 
-    if "DESC PARTIDA" not in df_contratos.columns:
-        df_contratos["DESC PARTIDA"] = ""
+if "PARTIDA" not in df_evolucion.columns:
+    st.error(
+        f"No existe la columna 'PARTIDA' en Evolucion. "
+        f"Columnas disponibles: {list(df_evolucion.columns)}"
+    )
+    st.stop()
 
-    df_contratos["PARTIDA"] = normalizar_partida(df_contratos["PARTIDA"])
+# ================= NORMALIZAR PARTIDAS =================
+df_contratos["PARTIDA"] = normalizar_partida(
+    df_contratos["PARTIDA"]
+)
 
-    if "Etiquetas fila" not in df_evolucion.columns:
-        st.error(f"No existe la columna 'Etiquetas fila' en Evolucion. Columnas: {list(df_evolucion.columns)}")
-        st.stop()
+df_evolucion["PARTIDA"] = normalizar_partida(
+    df_evolucion["PARTIDA"]
+)
 
-    df_evolucion["Etiquetas fila"] = normalizar_partida(df_evolucion["Etiquetas fila"])
+# ================= DEBUG TEMPORAL =================
+with st.expander("DEBUG PARTIDAS", expanded=False):
 
-    if "PARTIDA" in df_evolucion.columns:
-        df_evolucion["PARTIDA"] = df_evolucion["PARTIDA"].astype(str).str.strip()
+    st.write("PARTIDAS EN CONTRATOS")
+    st.write(
+        sorted(
+            df_contratos["PARTIDA"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+    )
+
+    st.write("PARTIDAS EN EVOLUCION")
+    st.write(
+        sorted(
+            df_evolucion["PARTIDA"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+    )
+
+    partidas_contratos = set(
+        df_contratos["PARTIDA"]
+        .dropna()
+        .astype(str)
+    )
+
+    partidas_evolucion = set(
+        df_evolucion["PARTIDA"]
+        .dropna()
+        .astype(str)
+    )
+
+    coincidencias = partidas_contratos.intersection(
+        partidas_evolucion
+    )
+
+    st.write("COINCIDENCIAS")
+    st.write(sorted(list(coincidencias)))
 
     df_contratos["N° CONTRATO"] = normalizar_contrato(df_contratos["N° CONTRATO"])
     df_clc["CONTRATO"] = normalizar_contrato(df_clc["CONTRATO"])
@@ -289,10 +338,9 @@ if st.session_state.proyecto != "Todos":
         .unique()
         .tolist()
     )
-
-    evo = df_evolucion[
-        df_evolucion["Etiquetas fila"].astype(str).isin(partidas_seleccionadas)
-    ].copy()
+evo = df_evolucion[
+    df_evolucion["PARTIDA"].astype(str).isin(partidas_seleccionadas)
+].copy()
 
     if not evo.empty:
         st.header("Evolución de la Partida", anchor=False)
@@ -309,10 +357,19 @@ if st.session_state.proyecto != "Todos":
         e4.metric("Ejercido", formato_pesos(ejercido_evolucion))
 
         st.subheader("Registros encontrados en Evolucion")
+       
         columnas_evo = [
-            col for col in ["Etiquetas fila", "PARTIDA", "ORIGINAL", "MODIFICADO", "COMPROMETIDO", "EJERCIDO"]
-            if col in evo.columns
-        ]
+    col for col in [
+        "PARTIDA",
+        "DESCRIPCION",
+        "ORIGINAL",
+        "MODIFICADO",
+        "COMPROMETIDO",
+        "EJERCIDO"
+    ]
+    if col in evo.columns
+]
+               
         st.dataframe(evo[columnas_evo], use_container_width=True)
     else:
         st.warning("No se encontraron valores en la hoja Evolucion para las partidas seleccionadas.")
